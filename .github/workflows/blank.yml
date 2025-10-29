@@ -1,41 +1,192 @@
-name: Build and Log Nexus CLI
+import { execSync, spawn } from "child_process";
+import fs from "fs";
+import path from "path";
 
-on:
-  workflow_dispatch:
+const TOKEN = process.env.GITHUB_TOKEN;
+const CODESPACE_NAME = process.env.CODESPACE_NAME;
+const HOME = process.env.HOME;
+const PROJECT_PATH = path.join(HOME, "nexus-cli");
+const LOG_PATH = path.join(HOME, "auto.log");
+const AUTO_SCRIPT = path.join(HOME, "auto_manager.js");
 
-jobs:
-  build-nexus:
-    runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      HOME: ${{ github.workspace }}
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+const KEEPALIVE_INTERVAL = 10 * 60 * 1000; // 10 phút
+const RESTART_INTERVAL = 5 * 60 * 60 * 1000 + 50 * 60 * 1000; // 5h50m
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 22
+// Nội dung setup.rs
+const SETUP_RS_PATH = path.join(PROJECT_PATH, "clients/cli/src/session/setup.rs");
+const SETUP_RS_CONTENT = `//! Session setup and initialization
+use crate::analytics::set_wallet_address_for_reporting;
+use crate::config::Config;
+use crate::environment::Environment;
+use crate::events::Event;
+use crate::orchestrator::OrchestratorClient;
+use crate::runtime::start_authenticated_worker;
+use ed25519_dalek::SigningKey;
+use std::error::Error;
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use tokio::sync::{broadcast, mpsc};
+use tokio::task::JoinHandle;
 
-      - name: Setup Rust
-        uses: actions/setup-rust@v1
-        with:
-          rust-version: stable
+#[derive(Debug)]
+pub struct SessionData {
+    pub event_receiver: mpsc::Receiver<Event>,
+    pub join_handles: Vec<JoinHandle<()>>,
+    pub shutdown_sender: broadcast::Sender<()>,
+    pub max_tasks_shutdown_sender: broadcast::Sender<()>,
+    pub node_id: u64,
+    pub orchestrator: OrchestratorClient,
+    pub num_workers: usize,
+}
 
-      - name: Install dependencies
-        run: |
-          cd $HOME/nexus-cli
-          npm install
+// Mỗi thread dự kiến dùng ~1.5 GB
+const MEMORY_PER_THREAD: u64 = (1.5 * 1024.0 * 1024.0 * 1024.0) as u64; // bytes
 
-      - name: Build Nexus CLI
-        run: |
-          cd $HOME/nexus-cli/clients/cli
-          mkdir -p $HOME/auto_log
-          LOG_PATH=$HOME/auto_log/build.log
-          echo "Starting build at $(date)" | tee -a $LOG_PATH
-          cargo build --release 2>&1 | tee -a $LOG_PATH
-          echo "Build finished at $(date)" | tee -a $LOG_PATH
+fn clamp_threads_by_memory(requested_threads: usize) -> usize {
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let total_bytes = sys.total_memory() * 1024; // KB → bytes
+    let max_threads_by_memory = (total_bytes / MEMORY_PER_THREAD) as usize;
+    requested_threads.min(max_threads_by_memory.max(1))
+}
 
-      - name: Show last 20 lines of log
-        run: tail -n 20 $HOME/auto_log/build.log
+pub fn warn_memory_configuration(max_threads: Option<u32>) {
+    if let Some(threads) = max_threads {
+        let current_pid = Pid::from(std::process::id() as usize);
+        let mut sysinfo = System::new();
+        sysinfo.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[current_pid]),
+            true,
+            ProcessRefreshKind::nothing().with_memory(),
+        );
+
+        if let Some(process) = sysinfo.process(current_pid) {
+            let ram_total = process.memory() * 1024;
+            if threads as u64 * MEMORY_PER_THREAD >= ram_total {
+                crate::print_cmd_warn!(
+                    "⚠️ OOM warning",
+                    "Projected memory usage across {} threads (~1.5GB each) may exceed available memory.",
+                    threads
+                );
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+        }
+    }
+}
+
+pub async fn setup_session(
+    config: Config,
+    env: Environment,
+    check_mem: bool,
+    max_threads: Option<u32>,
+    max_tasks: Option<u32>,
+    max_difficulty: Option<crate::nexus_orchestrator::TaskDifficulty>,
+) -> Result<SessionData, Box<dyn Error>> {
+    let node_id = config.node_id.parse::<u64>()?;
+    let client_id = config.user_id;
+
+    let mut csprng = rand_core::OsRng;
+    let signing_key: SigningKey = SigningKey::generate(&mut csprng);
+
+    let orchestrator_client = OrchestratorClient::new(env.clone());
+
+    let requested_threads = max_threads.unwrap_or(40) as usize;
+    let mut num_workers = clamp_threads_by_memory(requested_threads);
+
+    if check_mem {
+        warn_memory_configuration(Some(num_workers as u32));
+    }
+
+    let (shutdown_sender, _) = broadcast::channel(1);
+
+    set_wallet_address_for_reporting(config.wallet_address.clone());
+
+    let (event_receiver, join_handles, max_tasks_shutdown_sender) = start_authenticated_worker(
+        node_id,
+        signing_key,
+        orchestrator_client.clone(),
+        shutdown_sender.subscribe(),
+        env,
+        client_id,
+        max_tasks,
+        max_difficulty,
+        num_workers,
+    )
+    .await;
+
+    println!(
+        "✅ Session started: {} workers active (~{} GB estimated RAM)",
+        num_workers,
+        (num_workers as f64 * 1.5).ceil()
+    );
+
+    Ok(SessionData {
+        event_receiver,
+        join_handles,
+        shutdown_sender,
+        max_tasks_shutdown_sender,
+        node_id,
+        orchestrator: orchestrator_client,
+        num_workers,
+    })
+}
+`;
+
+function log(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  process.stdout.write(line);
+  fs.appendFileSync(LOG_PATH, line);
+}
+
+function run(cmd, opts = {}) {
+  log(`⚙️  ${cmd}`);
+  return execSync(cmd, { stdio: "inherit", ...opts });
+}
+
+// Ghi đè setup.rs
+fs.writeFileSync(SETUP_RS_PATH, SETUP_RS_CONTENT);
+log("✅ setup.rs đã được ghi đè");
+
+// Build Nexus CLI
+try {
+  run(`cd ${PROJECT_PATH} && cargo build --release`);
+} catch (err) {
+  log("❌ Build lỗi, script vẫn tiếp tục giám sát tiến trình...");
+}
+
+// Hàm start auto_manager.js
+let childProcess = null;
+function startAutoManager() {
+  if (childProcess) return;
+
+  log("🚀 Bắt đầu workflow auto_manager.js...");
+  childProcess = spawn("node", [AUTO_SCRIPT], {
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  childProcess.stdout.on("data", (data) => log(data.toString()));
+  childProcess.stderr.on("data", (data) => log(data.toString()));
+
+  childProcess.on("exit", (code) => {
+    log(`⚠️ auto_manager.js exited với code ${code}, sẽ restart sau 10 phút`);
+    childProcess = null;
+  });
+}
+
+// Giám sát tiến trình mỗi 10 phút
+setInterval(() => {
+  if (!childProcess) startAutoManager();
+}, KEEPALIVE_INTERVAL);
+
+// Restart sau 5h50m nếu vẫn chạy
+setInterval(() => {
+  if (childProcess) {
+    log("🔄 Thời gian restart định kỳ, kill auto_manager.js và start lại");
+    childProcess.kill();
+    childProcess = null;
+    startAutoManager();
+  }
+}, RESTART_INTERVAL);
+
+// Start lần đầu
+startAutoManager();
