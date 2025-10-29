@@ -1,0 +1,41 @@
+name: Build and Log Nexus CLI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-nexus:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      HOME: ${{ github.workspace }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: actions/setup-rust@v1
+        with:
+          rust-version: stable
+
+      - name: Install dependencies
+        run: |
+          cd $HOME/nexus-cli
+          npm install
+
+      - name: Build Nexus CLI
+        run: |
+          cd $HOME/nexus-cli/clients/cli
+          mkdir -p $HOME/auto_log
+          LOG_PATH=$HOME/auto_log/build.log
+          echo "Starting build at $(date)" | tee -a $LOG_PATH
+          cargo build --release 2>&1 | tee -a $LOG_PATH
+          echo "Build finished at $(date)" | tee -a $LOG_PATH
+
+      - name: Show last 20 lines of log
+        run: tail -n 20 $HOME/auto_log/build.log
