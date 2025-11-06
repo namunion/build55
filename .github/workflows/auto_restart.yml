@@ -8,21 +8,24 @@ on:
 jobs:
   restart:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Show debug info
+      - name: Detect current Codespace name
+        id: detect
         run: |
-          echo "Starting auto-restart for Codespace"
-          date
-          echo "User: ${{ github.actor }}"
-          echo "Repo: ${{ github.repository }}"
+          echo "📦 Detecting active Codespace..."
+          name=$(gh codespace list --json name,state --jq '.[] | select(.state=="Available") | .name' | head -n 1)
+          echo "Detected Codespace: $name"
+          echo "name=$name" >> $GITHUB_OUTPUT
 
       - name: Restart Codespace via API
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CODESPACE_NAME: "<CODESPACE_NAME>"
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
-          echo "Restarting Codespace: $CODESPACE_NAME"
+          echo "🚀 Restarting Codespace: ${{ steps.detect.outputs.name }}"
           curl -X POST \
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/user/codespaces/$CODESPACE_NAME/start
+            https://api.github.com/user/codespaces/${{ steps.detect.outputs.name }}/start
+
+
