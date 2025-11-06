@@ -1,0 +1,43 @@
+name: Nexus Continuous Run (6h)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  nexus-runner:
+    runs-on:  ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler pkg-config libssl-dev
+
+      - name: Build Nexus CLI
+        run: |
+          cd nexus-cli/clients/cli
+          cargo build --release
+
+      - name: Run Nexus Node (6h continuous)
+        run: |
+          cd nexus-cli/clients/cli
+          echo "🚀 Running Nexus Node for 6 hours with Node ID: $NODE_ID"
+          export NODE_ID=$NODE_ID
+          timeout 6h ./target/release/nexus-network start \
+            --headless \
+            --node-id "$NODE_ID" \
+            --max-threads 8 \
+            --max-difficulty extra_large_5
+        env:
+          RUST_BACKTRACE: 1
+          NODE_ID: ${{ secrets.NODE_ID }}
+
