@@ -9,7 +9,7 @@ on:
 
 jobs:
   nexus-runner:
-    runs-on: ubuntu-22.04-4core
+    runs-on:  ubuntu-latest
     timeout-minutes: 360
 
     steps:
@@ -40,3 +40,4 @@ jobs:
         env:
           RUST_BACKTRACE: 1
           NODE_ID: ${{ secrets.NODE_ID }}
+
