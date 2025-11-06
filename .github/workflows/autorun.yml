@@ -24,11 +24,12 @@ jobs:
 
       - name: Build Nexus CLI
         run: |
-          cd clients/cli
+          cd nexus-cli/clients/cli
           cargo build --release
+
       - name: Run Nexus Node (6h continuous)
         run: |
-          cd clients/cli
+          cd nexus-cli/clients/cli
           echo "🚀 Running Nexus Node for 6 hours with Node ID: $NODE_ID"
           export NODE_ID=$NODE_ID
           timeout 6h ./target/release/nexus-network start \
@@ -39,4 +40,3 @@ jobs:
         env:
           RUST_BACKTRACE: 1
           NODE_ID: ${{ secrets.NODE_ID }}
-
