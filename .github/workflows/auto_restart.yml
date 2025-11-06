@@ -8,19 +8,16 @@ on:
 jobs:
   restart:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      codespaces: write
 
     steps:
-      - name: Install GitHub CLI
+      - name: Install GitHub CLI and jq
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gh jq
-
-      - name: Authenticate GitHub CLI
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          echo "🔐 Authenticating gh CLI..."
-          echo $GH_TOKEN | gh auth login --with-token
+          sudo apt update -y
+          sudo apt install -y gh jq
 
       - name: Detect current Codespace name
         id: detect
@@ -41,4 +38,3 @@ jobs:
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/user/codespaces/${{ steps.detect.outputs.name }}/start
-
