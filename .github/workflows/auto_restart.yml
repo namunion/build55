@@ -31,7 +31,7 @@ jobs:
       - name: 🔎 Tìm Codespace đang hoạt động
         id: detect
         run: |
-          name=$(gh codespace list --json name,state,updatedAt --jq '.[] | select(.state=="Available") | .name' | head -n 1)
+          name=$(gh codespace list --json name,state,lastUsedAt --jq '.[] | select(.state=="Available") | .name' | head -n 1)
           echo "🧩 Codespace phát hiện: $name"
           echo "name=$name" >> $GITHUB_OUTPUT
 
@@ -43,7 +43,7 @@ jobs:
           CODE_NAME=${{ steps.detect.outputs.name }}
           echo "🕒 Kiểm tra thời gian hoạt động của Codespace: $CODE_NAME"
           
-          START_TIME=$(gh codespace list --json name,updatedAt --jq ".[] | select(.name==\"$CODE_NAME\") | .updatedAt")
+          START_TIME=$(gh codespace list --json name,lastUsedAt --jq ".[] | select(.name==\"$CODE_NAME\") | .lastUsedAt")
           START_EPOCH=$(date -d "$START_TIME" +%s)
           NOW_EPOCH=$(date +%s)
           RUNTIME_MIN=$(( (NOW_EPOCH - START_EPOCH) / 60 ))
