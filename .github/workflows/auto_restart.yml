@@ -10,8 +10,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh jq
+
+      - name: Authenticate GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+        run: |
+          echo "🔐 Authenticating gh CLI..."
+          echo $GH_TOKEN | gh auth login --with-token
+
       - name: Detect current Codespace name
         id: detect
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           echo "📦 Detecting active Codespace..."
           name=$(gh codespace list --json name,state --jq '.[] | select(.state=="Available") | .name' | head -n 1)
@@ -27,5 +41,4 @@ jobs:
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/user/codespaces/${{ steps.detect.outputs.name }}/start
-
 
