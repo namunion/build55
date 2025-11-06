@@ -1,0 +1,28 @@
+name: Auto Restart Codespace
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"  # Mỗi 6 tiếng restart Codespace
+  workflow_dispatch:
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show debug info
+        run: |
+          echo "Starting auto-restart for Codespace"
+          date
+          echo "User: ${{ github.actor }}"
+          echo "Repo: ${{ github.repository }}"
+
+      - name: Restart Codespace via API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODESPACE_NAME: "<CODESPACE_NAME>"
+        run: |
+          echo "Restarting Codespace: $CODESPACE_NAME"
+          curl -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/user/codespaces/$CODESPACE_NAME/start
