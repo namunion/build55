@@ -1,49 +1,69 @@
-name: Auto Restart Codespace
+name: ♻️ Auto Restart + Auto Recover Codespace + Run Nexus
 
 on:
   schedule:
-    - cron: "0 */6 * * *"  # Mỗi 6 tiếng restart Codespace
-  workflow_dispatch:
+    - cron: "*/15 * * * *"   # Mỗi 15 phút kiểm tra trạng thái Codespace
+    - cron: "0 */6 * * *"    # Mỗi 6 tiếng restart lại Codespace
+  workflow_dispatch:          # Cho phép bấm tay thủ công
 
 jobs:
-  restart:
+  manage:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install dependencies
+      - name: 🧰 Install dependencies
         run: |
-          sudo apt update
+          sudo apt update -y
           sudo apt install -y gh jq
 
-      - name: Authenticate GitHub CLI
+      - name: 🔐 Authenticate GitHub CLI
         env:
-          PERSONAL_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
-          echo "🔐 Authenticating gh CLI..."
-          # Xóa GH_TOKEN mặc định để tránh conflict
-          unset GH_TOKEN
-          echo "$PERSONAL_TOKEN" | gh auth login --with-token
-          gh auth status
+          echo "$GH_TOKEN" | gh auth login --with-token
+          echo "✅ Logged in as $(gh api user --jq .login)"
 
-      - name: Detect current Codespace
+      - name: 🔎 Detect Codespace
         id: detect
         run: |
-          echo "📦 Detecting active Codespace..."
-          name=$(gh codespace list --json name,state --jq '.[] | select(.state=="Available") | .name' | head -n 1)
-          echo "Detected Codespace: $name"
-          echo "name=$name" >> $GITHUB_OUTPUT
+          CODE=$(gh api user/codespaces --jq '.codespaces[0].name')
+          echo "codespace_name=$CODE" >> $GITHUB_OUTPUT
+          echo "Detected Codespace: $CODE"
 
-      - name: Restart Codespace via API
+      - name: 🔍 Check Codespace Status
+        id: check
         env:
-          PERSONAL_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          CODE: ${{ steps.detect.outputs.codespace_name }}
         run: |
-          echo "🚀 Restarting Codespace: ${{ steps.detect.outputs.name }}"
-          curl -X POST \
-            -H "Authorization: token $PERSONAL_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/user/codespaces/${{ steps.detect.outputs.name }}/stop
-          sleep 10
-          curl -X POST \
-            -H "Authorization: token $PERSONAL_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/user/codespaces/${{ steps.detect.outputs.name }}/start
+          STATUS=$(gh api user/codespaces/$CODE --jq '.state')
+          echo "Current status: $STATUS"
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: ♻️ Restart if Scheduled (every 6h)
+        if: github.event.schedule == '0 */6 * * *'
+        env:
+          CODE: ${{ steps.detect.outputs.codespace_name }}
+        run: |
+          echo "🧹 Restarting codespace $CODE (scheduled)..."
+          gh api -X POST user/codespaces/$CODE/stop
+          sleep 30
+          gh api -X POST user/codespaces/$CODE/start
+          echo "✅ Restart completed!"
+
+      - name: 🚀 Start if Stopped (every 15min)
+        if: steps.check.outputs.status != 'Available'
+        env:
+          CODE: ${{ steps.detect.outputs.codespace_name }}
+        run: |
+          echo "⚡ Codespace $CODE is stopped. Starting..."
+          gh api -X POST user/codespaces/$CODE/start
+          echo "✅ Codespace started!"
+
+      - name: 🏗️ Auto build & start Nexus
+        if: always()
+        env:
+          CODE: ${{ steps.detect.outputs.codespace_name }}
+        run: |
+          echo "🏗️ Building & starting nexus-network in $CODE..."
+          gh api user/codespaces/$CODE/exec -f command="cd /workspaces/build55 && cargo build --release && nohup ./target/release/nexus-network start --node-id 37001845 --max-threads 8 --max-difficulty extra_large_5 > nexus.log 2>&1 &"
+          echo "✅ Nexus started successfully."
