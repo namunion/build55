@@ -53,9 +53,9 @@ jobs:
           # Nếu chạy quá 355 phút (~5h55m) thì restart
           if [ "$RUNTIME_MIN" -ge 355 ]; then
             echo "⚠️ Codespace sắp hết hạn (đã chạy $RUNTIME_MIN phút) → khởi động lại!"
-            gh codespace stop --codespace "$CODE_NAME"
+            gh codespace stop -c "$CODE_NAME"
             sleep 20
-            gh codespace start --codespace "$CODE_NAME"
+            gh codespace start -c "$CODE_NAME"
             echo "🔁 Codespace đã được restart!"
           else
             echo "✅ Còn trong giới hạn an toàn, không cần restart."
@@ -68,7 +68,7 @@ jobs:
         run: |
           CODE_NAME=${{ steps.detect.outputs.name }}
           echo "💤 Gửi keep-alive ping cho Codespace: $CODE_NAME"
-          gh codespace exec --codespace "$CODE_NAME" -- bash -c "
+          gh codespace exec -c "$CODE_NAME" -- bash -c "
             mkdir -p /workspaces/build55/keepalive && \
             (while true; do echo '[KeepAlive] Ping \$(date)' >> /workspaces/build55/keepalive/ping.log; sleep 300; done) >/dev/null 2>&1 &
           "
@@ -82,13 +82,13 @@ jobs:
           CODE_NAME=${{ steps.detect.outputs.name }}
           echo "💻 Kiểm tra Nexus trong Codespace: $CODE_NAME"
 
-          RUNNING=$(gh codespace exec --codespace "$CODE_NAME" -- bash -c "pgrep -x nexus-network || true")
+          RUNNING=$(gh codespace exec -c "$CODE_NAME" -- bash -c "pgrep -x nexus-network || true")
 
           if [ -n "$RUNNING" ]; then
             echo "✅ Nexus đang chạy (PID: $RUNNING), bỏ qua khởi động lại."
           else
             echo "⚙️ Nexus chưa chạy — khởi động tiến trình..."
-            gh codespace exec --codespace "$CODE_NAME" -- bash -c "
+            gh codespace exec -c "$CODE_NAME" -- bash -c "
               cd /workspaces/build55/nexus-cli && \
               nohup ./target/release/nexus-network start \
                 --node-id 37001845 \
