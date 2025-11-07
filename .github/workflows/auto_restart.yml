@@ -70,16 +70,19 @@ jobs:
           ' || echo "⚠️ Ping lỗi nhẹ (Codespace có thể đang tạm ngủ)"
           echo "✅ Keep-alive ping gửi thành công!"
 
-      - name: 💻 Kiểm tra & khởi động Nexus (nếu chưa chạy) 
+      - name: 💻 Kiểm tra & khởi động Nexus (nếu chưa chạy)
         if: steps.detect.outputs.name != ''
         run: |
           CODE=${{ steps.detect.outputs.name }}
           echo "💻 Kiểm tra tiến trình Nexus..."
-          
-          # Lấy danh sách PID nếu Nexus đang chạy
-          IS_RUNNING=$(gh codespace ssh --codespace "$CODE" -- bash -lc "pgrep -f 'nexus-network' || true")
 
-          if [ -n \"$IS_RUNNING\" ]; then
+          # ⚙️ Tắt tạm thông báo của NVS để khỏi log lỗi vớ vẩn
+          gh codespace ssh --codespace "$CODE" -- bash -lc 'unset NVS_HOME; unset NVS_DIR'
+
+          # 🔍 Kiểm tra xem Nexus có đang chạy không
+          IS_RUNNING=$(gh codespace ssh --codespace "$CODE" -- bash -lc "pgrep -af nexus-network | awk '{print \$1}' || true")
+
+          if [ -n "$IS_RUNNING" ]; then
             echo "✅ Nexus đang chạy (PID: $IS_RUNNING)"
           else
             echo "⚙️ Nexus chưa chạy — khởi động headless..."
@@ -87,7 +90,7 @@ jobs:
               mkdir -p /workspaces/build55/nexus-cli
               cd /workspaces/build55/nexus-cli
               if [ -f ./target/release/nexus-network ]; then
-                echo "🚀 Bắt đầu chạy Nexus headless..."
+                echo "🚀 Đang khởi động Nexus headless..."
                 nohup ./target/release/nexus-network start \
                   --node-id 37001845 \
                   --max-threads 8 \
