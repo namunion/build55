@@ -68,50 +68,41 @@ jobs:
             mkdir -p /workspaces/build55/keepalive
             echo "[KeepAlive] $(date)" >> /workspaces/build55/keepalive/ping.log
           ' || echo "⚠️ Ping lỗi nhẹ (Codespace có thể đang tạm ngủ)"
-          echo "✅ Keep-alive ping gửi thành công!"
+          echo "✅ Keep-alive ping gửi thành công!"  
+          
+     - name: 💻 Kiểm tra tiến trình Nexus
+       run: |
+        CODE="scary-spooky-coffin-wqv595qjqx42wvg"
 
-      - name: 💻 Kiểm tra & khởi động Nexus nếu chưa chạy
-        if: steps.detect.outputs.name != ''
-        run: |
-          CODE=${{ steps.detect.outputs.name }}
-          echo "💻 Kiểm tra tiến trình Nexus..."
+        echo "💻 Kiểm tra tiến trình Nexus..."
+        gh codespace ssh --codespace "$CODE" -- bash -lc '
+        set -e
+        cd /workspaces/build55/nexus-cli/clients/cli || exit 1
 
-          # Tắt NVS để tránh lỗi node version
-          gh codespace ssh --codespace "$CODE" -- bash -lc 'unset NVS_HOME; unset NVS_DIR'
+        PIDS=$(pgrep -f "nexus-network" || true)
+        if [ -n "$PIDS" ]; then
+        echo "✅ Nexus đang chạy (PID: $PIDS)"
+        exit 0
+        fi
 
-          # Kiểm tra Nexus đang chạy chưa
-          IS_RUNNING=$(gh codespace ssh --codespace "$CODE" -- bash -lc 'pgrep -af nexus-network | awk "{print \$1}" || true')
+        echo "⚙️ Nexus chưa chạy — chuẩn bị khởi động headless..."
 
-          if [ -n "$IS_RUNNING" ]; then
-            echo "✅ Nexus đang chạy (PID: $IS_RUNNING)"
-          else
-            echo "⚙️ Nexus chưa chạy — chuẩn bị khởi động headless..."
-            gh codespace ssh --codespace "$CODE" -- bash -lc '
-              set -e
-              mkdir -p /workspaces/build55/nexus-cli
-              cd /workspaces/build55/nexus-cli
+        BINARY="./target/release/nexus-network"
 
-              # Nếu chưa có binary thì build
-              if [ ! -f ./target/release/nexus-network ]; then
-                echo "🔨 Binary chưa có — đang build lại..."
-                cargo build --release || { echo "❌ Build thất bại!"; exit 1; }
-              fi
+        if [ ! -f "$BINARY" ]; then
+        echo "❌ Không tìm thấy binary Nexus tại $BINARY"
+        exit 1
+        fi
 
-              # Nếu build thành công thì chạy headless
-              if [ -f ./target/release/nexus-network ]; then
-                echo "🚀 Khởi động Nexus headless..."
-                nohup ./target/release/nexus-network start \
-                  --node-id 37001845 \
-                  --max-threads 8 \
-                  --max-difficulty extra_large_5 \
-                  --headless > /workspaces/build55/nexus-cli/nexus_headless.log 2>&1 &
-                echo "✅ Nexus headless đã khởi động!"
-              else
-                echo "❌ Không tìm thấy binary Nexus tại ./target/release/nexus-network"
-              fi
-            '
-          fi
+        echo "🚀 Khởi động Nexus headless..."
+        nohup "$BINARY" start \
+        --node-id 37001845 \
+        --max-threads 8 \
+        --max-difficulty extra_large_5 \
+        --headless > /workspaces/build55/nexus-cli/clients/cli/nexus_headless.log 2>&1 &
 
+        echo "✅ Nexus headless đã khởi động!"
+      '
 
 
 
