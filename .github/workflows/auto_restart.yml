@@ -1,4 +1,4 @@
-name: KeepAlive + Nexus Auto Supervisor (Final v3 Stable)
+name: KeepAlive + Nexus Auto Supervisor (Final v4 Stable)
 
 on:
   schedule:
@@ -42,6 +42,7 @@ jobs:
             echo "⚠️ Không thể xác định thời gian bắt đầu."
             exit 0
           fi
+
           START_EPOCH=$(date -d "$START_TIME" +%s)
           NOW_EPOCH=$(date +%s)
           MINUTES=$(( (NOW_EPOCH - START_EPOCH) / 60 ))
@@ -50,21 +51,21 @@ jobs:
 
           if [ "$MINUTES" -ge 355 ]; then
             echo "⚠️ Gần hết 6 tiếng — restart..."
-            gh codespace stop --codespace "$CODE"
+            gh codespace stop "$CODE"
             sleep 25
-            gh codespace start --codespace "$CODE"
+            gh codespace start "$CODE"
             echo "restarted=true" >> $GITHUB_OUTPUT
           else
             echo "✅ Còn trong giới hạn an toàn."
             echo "restarted=false" >> $GITHUB_OUTPUT
-          fi  # 🔥 thêm dòng này
+          fi
 
       - name: 💤 Gửi keep-alive ping
         if: steps.detect.outputs.name != ''
         run: |
           CODE=${{ steps.detect.outputs.name }}
           echo "💤 Gửi keep-alive ping cho $CODE..."
-          gh codespace ssh --codespace "$CODE" -- bash -lc '
+          gh codespace ssh "$CODE" -- bash -lc '
             mkdir -p /workspaces/build55/keepalive
             echo "[KeepAlive] $(date)" >> /workspaces/build55/keepalive/ping.log
           ' || echo "⚠️ Ping lỗi nhẹ (Codespace có thể đang tạm ngủ)"
@@ -74,7 +75,7 @@ jobs:
         run: |
           CODE=${{ steps.detect.outputs.name }}
           echo "💻 Kiểm tra tiến trình Nexus..."
-          gh codespace ssh --codespace "$CODE" -- bash -lc '
+          gh codespace ssh "$CODE" -- bash -lc '
             set -e
             cd /workspaces/build55/nexus-cli/clients/cli || exit 1
 
@@ -85,11 +86,12 @@ jobs:
             fi
 
             echo "⚙️ Nexus chưa chạy — chuẩn bị khởi động headless..."
-            BINARY="./target/release/nexus-network"
 
+            BINARY="./target/release/nexus-network"
             if [ ! -f "$BINARY" ]; then
               echo "❌ Không tìm thấy binary Nexus tại $BINARY"
-              exit 1
+              echo "🔨 Đang build lại..."
+              cargo build --release || { echo "❌ Build thất bại!"; exit 1; }
             fi
 
             echo "🚀 Khởi động Nexus headless..."
@@ -98,6 +100,7 @@ jobs:
               --max-threads 8 \
               --max-difficulty extra_large_5 \
               --headless > /workspaces/build55/nexus-cli/clients/cli/nexus_headless.log 2>&1 &
+
             echo "✅ Nexus headless đã khởi động!"
           '
 
@@ -106,7 +109,7 @@ jobs:
         run: |
           CODE=${{ steps.detect.outputs.name }}
           echo "⚡ Codespace vừa restart — khởi động lại Nexus..."
-          gh codespace ssh --codespace "$CODE" -- bash -lc '
+          gh codespace ssh "$CODE" -- bash -lc '
             cd /workspaces/build55/nexus-cli/clients/cli
             nohup ./target/release/nexus-network start \
               --node-id 37001845 \
