@@ -67,7 +67,7 @@ jobs:
           gh codespace ssh --codespace "$CODE" -- bash -lc '
             mkdir -p /workspaces/build55/keepalive
             echo "[KeepAlive] $(date)" >> /workspaces/build55/keepalive/ping.log
-          '
+          ' || echo "⚠️ Ping lỗi nhẹ (Codespace có thể đang tạm ngủ)"
           echo "✅ Keep-alive ping gửi thành công!"
 
       - name: 💻 Kiểm tra & khởi động Nexus (nếu chưa chạy)
@@ -76,7 +76,7 @@ jobs:
           CODE=${{ steps.detect.outputs.name }}
           echo "💻 Kiểm tra tiến trình Nexus..."
           IS_RUNNING=$(gh codespace ssh --codespace "$CODE" -- bash -lc "pgrep -f nexus-network || true")
-          if [ -n \"$IS_RUNNING\" ]; then
+          if [ -n "$IS_RUNNING" ]; then
             echo "✅ Nexus đang chạy (PID: $IS_RUNNING)"
           else
             echo "⚙️ Nexus chưa chạy — khởi động headless..."
@@ -90,6 +90,7 @@ jobs:
             '
             echo "🚀 Nexus headless đã khởi động!"
           fi
+
 
       - name: ⚡ Tự khởi động Nexus sau restart Codespace
         if: steps.uptime.outputs.restarted == 'true'
