@@ -68,15 +68,25 @@ jobs:
           fi
 
       # Giữ Codespace hoạt động liên tục
-      - name: 💤 Giữ Codespace luôn hoạt động (KeepAlive)
+      - name: 💤 Giữ Codespace luôn hoạt động (KeepAlive - Safe mkdir)
         if: steps.detect.outputs.name != ''
         env:
           PERSONAL_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           CODE_NAME=${{ steps.detect.outputs.name }}
           echo "💤 Gửi keep-alive ping cho Codespace: $CODE_NAME"
-          gh codespace ssh --codespace "$CODE_NAME" -- bash -c 'mkdir -p /workspaces/build55/keepalive && echo "[KeepAlive] Ping $(date)" >> /workspaces/build55/keepalive/ping.log'
+          gh codespace ssh --codespace "$CODE_NAME" -- bash -c '
+            # Luôn đảm bảo thư mục đích tồn tại
+            TARGET_DIR="/workspaces/build55/keepalive"
+            if [ ! -d "/workspaces/build55" ]; then
+              echo "⚠️ /workspaces/build55 chưa tồn tại, dùng fallback ~/keepalive"
+              TARGET_DIR="$HOME/keepalive"
+            fi
+            mkdir -p "$TARGET_DIR"
+            echo "[KeepAlive] Ping $(date)" >> "$TARGET_DIR/ping.log"
+          '
           echo "✅ Keep-alive ping gửi thành công!"
+
 
       # Kiểm tra hoặc khởi động Nexus
       - name: 💻 Kiểm tra & khởi động Nexus (Headless)
