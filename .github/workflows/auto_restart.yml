@@ -1,8 +1,8 @@
-name: Auto Restart + KeepAlive + Run Nexus (Headless Stable)
+name: Auto Restart + KeepAlive + Run Nexus (Stable v5)
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/15 * * * *"   # Kiểm tra mỗi 15 phút
   workflow_dispatch:
 
 jobs:
@@ -10,31 +10,52 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧰 Cài đặt công cụ cần thiết
+      # -------------------------------------
+      # 1️⃣ Cài công cụ cần thiết
+      # -------------------------------------
+      - name: 🧰 Cài đặt gh, jq, curl
         run: |
           sudo apt update -y
           sudo apt install -y gh jq curl
 
-      - name: 🔐 Đăng nhập GitHub CLI bằng PERSONAL_TOKEN
+      # -------------------------------------
+      # 2️⃣ Đăng nhập GitHub CLI (an toàn, không lỗi GH_TOKEN)
+      # -------------------------------------
+      - name: 🔐 Đăng nhập GitHub CLI bằng PERSONAL_TOKEN (Safe)
         env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          PERSONAL_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
-          echo "Đăng nhập GitHub CLI bằng token cá nhân..."
-          echo "${{ secrets.PERSONAL_TOKEN }}" | gh auth login --with-token
+          echo "🧹 Gỡ GH_TOKEN mặc định để tránh xung đột..."
+          unset GITHUB_TOKEN
+          export GH_TOKEN="${PERSONAL_TOKEN}"
+
+          echo "🔑 Đăng nhập GitHub CLI..."
+          echo "$PERSONAL_TOKEN" | gh auth login --with-token --hostname github.com --git-protocol https
+          echo "✅ Đăng nhập thành công!"
           gh auth status
 
+      # -------------------------------------
+      # 3️⃣ Phát hiện Codespace đang chạy
+      # -------------------------------------
       - name: 🧩 Tìm Codespace đang hoạt động
         id: detect
         run: |
-          CODE_NAME=$(gh codespace list --json name,state --jq '.[] | select(.state=="Available") | .name' | head -n 1)
-          echo "🧩 Codespace phát hiện: $CODE_NAME"
-          echo "name=$CODE_NAME" >> $GITHUB_OUTPUT
+          name=$(gh codespace list --json name,state,lastUsedAt --jq '.[] | select(.state=="Available") | .name' | head -n 1)
+          if [ -z "$name" ]; then
+            echo "⚠️ Không tìm thấy Codespace nào đang hoạt động."
+          else
+            echo "🧩 Codespace phát hiện: $name"
+            echo "name=$name" >> $GITHUB_OUTPUT
+          fi
 
-      - name: ⏱️ Kiểm tra thời gian hoạt động và restart nếu gần hết hạn
+      # -------------------------------------
+      # 4️⃣ Kiểm tra uptime, restart nếu gần hết hạn
+      # -------------------------------------
+      - name: ⏱️ Kiểm tra thời gian hoạt động và restart nếu cần
         if: steps.detect.outputs.name != ''
         id: uptime
         env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           CODE_NAME=${{ steps.detect.outputs.name }}
           echo "🕒 Kiểm tra thời gian hoạt động của Codespace: $CODE_NAME"
@@ -48,84 +69,76 @@ jobs:
           echo "runtime=$RUNTIME_MIN" >> $GITHUB_OUTPUT
 
           if [ "$RUNTIME_MIN" -ge 355 ]; then
-            echo "⚠️ Codespace sắp hết hạn → restart..."
+            echo "⚠️ Codespace sắp hết hạn → tiến hành restart..."
             gh codespace stop --codespace "$CODE_NAME"
             sleep 20
             gh codespace start --codespace "$CODE_NAME"
-            echo "🔁 Codespace đã được restart!"
+            echo "🔁 Codespace đã restart!"
             echo "restarted=true" >> $GITHUB_OUTPUT
           else
             echo "✅ Còn trong giới hạn an toàn."
             echo "restarted=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 💤 Giữ Codespace luôn hoạt động (KeepAlive - Safe)
+      # -------------------------------------
+      # 5️⃣ Giữ Codespace luôn hoạt động
+      # -------------------------------------
+      - name: 💤 Giữ Codespace hoạt động (Keep-Alive)
         if: steps.detect.outputs.name != ''
         env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           CODE_NAME=${{ steps.detect.outputs.name }}
           echo "💤 Gửi keep-alive ping cho Codespace: $CODE_NAME"
-          gh codespace ssh --codespace "$CODE_NAME" --command '
-            TARGET_DIR="/workspaces/build55/keepalive"
-            mkdir -p "$TARGET_DIR"
-            echo "[KeepAlive] Ping $(date)" >> "$TARGET_DIR/ping.log"
+
+          gh codespace ssh --codespace "$CODE_NAME" -- bash -lc '
+            mkdir -p /workspaces/build55/keepalive
+            echo "[KeepAlive] $(date)" >> /workspaces/build55/keepalive/ping.log
           '
+
           echo "✅ Keep-alive ping gửi thành công!"
 
-      - name: 💻 Kiểm tra tiến trình Nexus
+      # -------------------------------------
+      # 6️⃣ Kiểm tra & khởi động Nexus (headless)
+      # -------------------------------------
+      - name: 🚀 Kiểm tra & khởi động Nexus (headless nếu chưa chạy)
         if: steps.detect.outputs.name != ''
-        id: check_nexus
         env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           CODE_NAME=${{ steps.detect.outputs.name }}
-          echo "🔍 Kiểm tra tiến trình Nexus trong Codespace: $CODE_NAME"
+          echo "💻 Kiểm tra tiến trình Nexus trên Codespace: $CODE_NAME"
 
-          STATUS=$(gh codespace ssh --codespace "$CODE_NAME" --command '
-            if pgrep -x nexus-network >/dev/null 2>&1; then
-              echo "running"
-            elif grep -q "Starting nexus" /workspaces/build55/nexus-cli/nexus_run.log 2>/dev/null; then
-              echo "maybe_running"
-            else
-              echo "stopped"
-            fi
-          ')
-          echo "Nexus status: $STATUS"
-          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          RUNNING=$(gh codespace ssh --codespace "$CODE_NAME" -- bash -lc 'pgrep -f nexus-network || true')
 
-      - name: 🚀 Khởi động Nexus headless nếu chưa chạy
-        if: steps.check_nexus.outputs.status == 'stopped'
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
-        run: |
-          CODE_NAME=${{ steps.detect.outputs.name }}
-          echo "⚙️ Nexus chưa chạy — khởi động ở chế độ headless..."
-          gh codespace ssh --codespace "$CODE_NAME" --command '
-            cd /workspaces/build55/nexus-cli || exit 1
-            nohup ./target/release/nexus-network start \
-              --node-id 37001845 \
-              --max-threads 8 \
-              --max-difficulty extra_large_5 \
-              --headless \
-              > /workspaces/build55/nexus-cli/nexus_run.log 2>&1 &
-          '
-          echo "🚀 Nexus headless đã khởi động!"
+          if [ -n "$RUNNING" ]; then
+            echo "✅ Nexus đang chạy (PID: $RUNNING)"
+          else
+            echo "⚙️ Nexus chưa chạy — khởi động ở chế độ headless..."
+            gh codespace ssh --codespace "$CODE_NAME" -- bash -lc '
+              cd /workspaces/build55/nexus-cli &&
+              nohup ./target/release/nexus-network start \
+                --node-id 37001845 \
+                --max-threads 8 \
+                --max-difficulty extra_large_5 \
+                --headless \
+                > /workspaces/build55/nexus-cli/nexus_headless.log 2>&1 &
+            '
+            echo "🚀 Nexus headless đã khởi động!"
+          fi
 
-      - name: ✅ Báo cáo trạng thái Nexus
-        if: steps.detect.outputs.name != ''
-        run: |
-          echo "📊 Trạng thái Nexus cuối cùng: ${{ steps.check_nexus.outputs.status }}"
-
-      - name: 🚀 Tự động khởi động Nexus sau restart
+      # -------------------------------------
+      # 7️⃣ Tự khởi động lại Nexus sau restart Codespace
+      # -------------------------------------
+      - name: ⚡ Tự khởi động Nexus sau restart
         if: steps.uptime.outputs.restarted == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+          GH_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
         run: |
           CODE_NAME=${{ steps.detect.outputs.name }}
-          echo "⚡ Codespace vừa restart, khởi động lại Nexus..."
-          gh codespace ssh --codespace "$CODE_NAME" --command '
-            cd /workspaces/build55/nexus-cli || exit 1
+          echo "⚡ Codespace vừa restart — khởi động lại Nexus..."
+          gh codespace ssh --codespace "$CODE_NAME" -- bash -lc '
+            cd /workspaces/build55/nexus-cli &&
             nohup ./target/release/nexus-network start \
               --node-id 37001845 \
               --max-threads 8 \
@@ -133,9 +146,11 @@ jobs:
               --headless \
               > /workspaces/build55/nexus-cli/nexus_auto_restart.log 2>&1 &
           '
-          echo "✅ Nexus headless đã tự khởi động sau restart!"
+          echo "✅ Đã tự khởi động lại Nexus sau restart!"
 
+      # -------------------------------------
+      # 8️⃣ Khi không có Codespace hoạt động
+      # -------------------------------------
       - name: ⚠️ Không có Codespace hoạt động
         if: steps.detect.outputs.name == ''
-        run: |
-          echo "⚠️ Không tìm thấy Codespace nào đang hoạt động. Hãy mở Codespace trước khi workflow chạy."
+        run: echo "⚠️ Không tìm thấy Codespace nào đang hoạt động. Hãy mở Codespace trước khi workflow chạy."
