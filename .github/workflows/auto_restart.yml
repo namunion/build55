@@ -57,6 +57,7 @@ jobs:
           else
             echo "✅ Còn trong giới hạn an toàn."
             echo "restarted=false" >> $GITHUB_OUTPUT
+          fi  # 🔥 thêm dòng này
 
       - name: 💤 Gửi keep-alive ping
         if: steps.detect.outputs.name != ''
