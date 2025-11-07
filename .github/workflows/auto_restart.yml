@@ -89,7 +89,7 @@ jobs:
 
             echo "⚙️ Nexus chưa chạy — khởi động headless..."
             nohup "$BINARY" start \
-              --node-id 37001845 \
+              --node-id 37252227 \
               --max-threads 8 \
               --max-difficulty extra_large_5 \
               --headless > nexus_headless.log 2>&1 &
@@ -104,7 +104,7 @@ jobs:
           gh codespace ssh -c "$CODE" -- bash -c '
             cd /workspaces/build55/nexus-cli/clients/cli || exit 1
             nohup ./target/release/nexus-network start \
-              --node-id 37001845 \
+              --node-id 37252227 \
               --max-threads 8 \
               --max-difficulty extra_large_5 \
               --headless > nexus_auto_restart.log 2>&1 &
