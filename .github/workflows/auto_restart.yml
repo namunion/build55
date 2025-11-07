@@ -78,11 +78,11 @@ jobs:
         run: |
           CODE_NAME=${{ steps.detect.outputs.name }}
           echo "💻 Kiểm tra tiến trình Nexus..."
-          if gh codespace ssh --codespace "$CODE_NAME" -- bash -lc "pgrep -f nexus-network >/dev/null 2>&1"; then
+          if gh codespace ssh --codespace "$CODE_NAME" --command "pgrep -f nexus-network >/dev/null 2>&1"; then
             echo "✅ Nexus đang chạy — không cần khởi động lại."
           else
             echo "⚙️ Nexus chưa chạy — khởi động headless..."
-            gh codespace ssh --codespace "$CODE_NAME" -- bash -lc "
+            gh codespace ssh --codespace "$CODE_NAME" --command "
               cd /workspaces/build55/nexus-cli &&
               nohup ./target/release/nexus-network start \
                 --node-id 37001845 \
@@ -92,6 +92,7 @@ jobs:
             "
             echo "🚀 Nexus headless đã khởi động!"
           fi
+
 
       - name: ⚡ Tự động khởi động Nexus sau restart Codespace
         if: steps.uptime.outputs.restarted == 'true'
